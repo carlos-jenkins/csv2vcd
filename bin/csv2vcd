@@ -34,6 +34,11 @@ Template for signal specification on VCD file format.
 signal_tpl = '$var wire 1 {symbol} {name} $end'
 
 """
+Template for signal change on VCD file format.
+"""
+changed_tpl = '{}{}'
+
+"""
 Header template for VCD file format.
 """
 header_tpl = '''\
@@ -60,11 +65,11 @@ $end
 Time unit conversion table.
 """
 units = {
-    'ps' : 1,
-    'ns' : 1000,
-    'us' : 1000000,
-    'ms' : 1000000000,
-    's'  : 1000000000000
+    'ps': 1,
+    'ns': 1000,
+    'us': 1000000,
+    'ms': 1000000000,
+    's': 1000000000000
 }
 
 
@@ -132,7 +137,9 @@ def convert(module, infile, outfile):
     # Initial state
     tinit, pinit = get_parts(l)
 
-    finit = ['{}{}'.format(pinit[i], symbols[i]) for i in range(len(pinit))]
+    finit = [
+        changed_tpl.format(pinit[i], symbols[i]) for i in range(len(pinit))
+    ]
 
     # Write VCD header
     outfile.write(header_tpl.format(
@@ -149,7 +156,7 @@ def convert(module, infile, outfile):
         timestamp, signals = get_parts(l)
         for p, n, s in zip(previous, signals, symbols):
             if p != n:
-                changed.append('{}{}\n'.format(n, s))
+                changed.append(changed_tpl.format(n, s))
 
         if changed:
             outfile.write('#')
@@ -157,6 +164,7 @@ def convert(module, infile, outfile):
             outfile.write('\n')
             for c in changed:
                 outfile.write(c)
+                outfile.write('\n')
             del(changed[:])
         previous = signals
 
