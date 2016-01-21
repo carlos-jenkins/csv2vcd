@@ -7,6 +7,9 @@ This small scripts allows to convert CSV sampling outputs from several signal
 analyzers to IEEE 1364-2001 VCD. Value Change Dump is the format used by
 GtkWave http://gtkwave.sourceforge.net/.
 
+Note: Currently there is 3 branches, the master supports integer variables,
+      another branch supports real variables, and the last one supports vector
+      variables.
 
 Usage
 -----
@@ -14,7 +17,6 @@ Usage
     csv2vcd [input csv] [output vcd]
 
 Example files can be found in the ``examples`` folder.
-
 
 License
 -------
@@ -31,3 +33,10 @@ License
     KIND, either express or implied.  See the License for the
     specific language governing permissions and limitations
     under the License.
+
+Improvements
+------------
+
+- Merge all branches to support integer, real and vector variables with the
+  same codebase.
+- Allow to setup CSV input clock resolution in the command line.
