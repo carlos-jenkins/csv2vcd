@@ -1,0 +1,249 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# csv2vcd - Signal analyzer CSV to IEEE 1364-2001 VCD file format converter
+#
+# Copyright (C) 2014 Carlos Jenkins <carlos@jenkins.co.cr>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+from email.Utils import formatdate
+from os.path import isfile, exists, basename, splitext
+import sys
+
+
+"""
+Symbols available for signals.
+"""
+symbols = [chr(i) for i in range(33, 127)]
+
+"""
+Template for signal specification on VCD file format.
+"""
+signal_tpl = '$var wire {vector} {symbol} {name} $end'
+
+"""
+Template for signal change on VCD file format.
+"""
+changed_tpl = '{}{}'
+
+"""
+Header template for VCD file format.
+"""
+header_tpl = '''\
+$date
+        {date}
+$end
+$version
+        1.0
+$end
+$timescale
+        1ns
+$end
+$scope module {module} $end
+{signals}
+$upscope $end
+$enddefinitions $end
+$dumpvars
+#0
+{initial}
+$end
+'''
+
+"""
+Time unit conversion table.
+"""
+units = {
+    'ns': 1,
+    'us': 1000,
+    'ms': 1000000,
+    's': 1000000000
+}
+
+# This list stores the multi-bit signal position in the line and its
+# corresponding width
+bus_index = []
+
+
+def get_parts(line):
+    """
+    Parse a line of the form:
+
+        "{signal_a},{signal_b},{...},{signal_x},{float} {time_unit}"
+
+    For example:
+
+        0,1,0,0,-52.415000 us
+
+    And return a tuple of time in pico seconds and a list of signals:
+
+        ({time_ps}, [{signal_a}, {signal_b}, {...}, {signal_x}])
+
+    For example:
+
+        (-52415000, [0, 1, 0, 0])
+    """
+    parts = line.strip().split(',')
+    time, unit = parts[-1].split()
+    del(parts[-1])
+
+    ctime = int(float(time) * units[unit])
+    for i, p in enumerate(parts):
+        for x in bus_index:
+            # If an item in the list parts is a multi-bit signal
+            if x[0] == i:
+                # For each multi-bit signal, convert it to binary format with
+                # zero-padding add a white-space in between the signal value
+                # and the symbol assigned to it in VCD
+                parts[i] = 'b' + p.zfill(int(x[1])) + ' '
+
+    # cparts = [int(p) for p in parts]
+    # or... cparts = map(int, parts)
+    return (ctime, parts)
+
+
+def convert(module, infile, outfile):
+    """
+    Given an input CSV and an output file perform the conversion of the first
+    and write the result to the second.
+    """
+
+    # Get signals
+    fline = infile.readline()
+    # -> List of signals names
+    psignals = [h[1:-1] for h in fline.strip().split(',')[:-1]]
+    # -> Check symbol capacity
+    if len(psignals) > len(symbols):
+        sys.stderr.write('ERROR: Not enough symbols available.\n')
+        return False
+    # -> VCD formatted signals descriptors
+
+    # List to store multi-bit signal width
+    vectors = []
+    for i in range(len(psignals)):
+        # In the csv file the multi-bit signal should be declared in the given
+        # format: signal_name [width-1:0]
+        if '[' in psignals[i]:
+            width = psignals[i][
+                (psignals[i].index('[') + 1):psignals[i].index(':')
+            ]
+            vectors.append(str(int(width) + 1))
+
+            # For multi-bit signal example: Data [31:0], signal width is 32
+            bus_index.append([i, vectors[i]])
+        else:
+            vectors.append('1')  # Width for single-bit signal should be 1
+
+    # Added vectors to the signal tuple to show signal width in VCD
+    fsignals = [
+        signal_tpl.format(
+            vector=vectors[i],
+            symbol=symbols[i],
+            name=psignals[i]
+        )
+        for i in range(len(psignals))
+    ]
+
+    # Skip garbage lines
+    found = False
+    for i, l in enumerate(infile, 1):
+        if l.strip().endswith('0 s'):
+            sys.stdout.write('Breakpoint at line #{}.\n'.format(i))
+            found = True
+            break
+
+    # Check that breakpoint was found
+    if not found:
+        sys.stdout.write('ERROR: Breakpoint "0 s" not found.\n')
+        return False
+
+    # Initial state
+    tinit, pinit = get_parts(l)
+
+    finit = [
+        changed_tpl.format(pinit[i], symbols[i]) for i in range(len(pinit))
+    ]
+
+    # Write VCD header
+    outfile.write(header_tpl.format(
+        date=formatdate(),
+        module=module,
+        signals='\n'.join(fsignals),
+        initial='\n'.join(finit)
+    ))
+
+    # Convert lines
+    previous = pinit
+    changed = []
+    for l in infile:
+        timestamp, signals = get_parts(l)
+        for p, n, s in zip(previous, signals, symbols):
+            if p != n:
+                changed.append(changed_tpl.format(n, s))
+
+        if changed:
+            outfile.write('#')
+            outfile.write(str(timestamp))
+            outfile.write('\n')
+            for c in changed:
+                outfile.write(c)
+                outfile.write('\n')
+            del(changed[:])
+        previous = signals
+
+    return True
+
+
+def main():
+    """
+    Main function. Handle arguments and files.
+    """
+
+    # Check arguments
+    if len(sys.argv) not in (2, 3):
+        sys.stderr.write('USAGE: csv2vcd [input csv] [output vcd]\n')
+        sys.exit(-1)
+
+    # Determine files
+    input_file = sys.argv[1]
+    module = splitext(basename(input_file))[0]
+    if len(sys.argv) != 3:
+        output_file = module + '.vcd'
+    else:
+        output_file = sys.argv[2]
+
+    # Check files
+    if not isfile(input_file):
+        sys.stderr.write(
+            'ERROR: Input file {} doesn\'t exists.\n'.format(
+                input_file
+            ))
+        sys.exit(-1)
+
+    if exists(output_file) and not isfile(output_file):
+        sys.stderr.write(
+            'ERROR: Output file {} exists and is not a file.\n'.format(
+                output_file
+            ))
+        sys.exit(-1)
+
+    with open(input_file, 'r') as infile:
+        with open(output_file, 'w') as outfile:
+            if not convert(module, infile, outfile):
+                sys.exit(-1)
+    sys.exit(0)
+
+
+if __name__ == '__main__':
+    main()
