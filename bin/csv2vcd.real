@@ -18,7 +18,7 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from email.Utils import formatdate
+from email.utils import formatdate
 from os.path import isfile, exists, basename, splitext
 import sys
 
